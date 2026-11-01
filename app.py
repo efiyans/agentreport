@@ -12,6 +12,8 @@ from utils import (
     get_category_breakdown,
     get_department_breakdown,
     export_financial_report,
+    generate_payroll_report,
+    create_sample_payroll_files,
 )
 
 
@@ -194,12 +196,13 @@ def main():
     # -------------------------------------------------------------------------
     # Dashboard Tabs
     # -------------------------------------------------------------------------
-    tab_overview, tab_monthly, tab_departments, tab_transactions, tab_export = st.tabs([
+    tab_overview, tab_monthly, tab_departments, tab_transactions, tab_export, tab_payroll = st.tabs([
         "📈 Overview & Trends",
         "📅 Monthly Performance",
         "🏢 Department & Category Breakdown",
         "📋 Transaction Details",
         "📥 Report Exporter (Excel / CSV)",
+        "📑 Payroll & Template Mapping",
     ])
 
     # Tab 1: Overview & Trends
@@ -337,6 +340,73 @@ def main():
                 use_container_width=True,
             )
 
+    # Tab 6: Payroll & Template Mapping
+    with tab_payroll:
+        st.subheader("📑 Employee Payroll & Template Mapping Engine")
+        st.write(
+            "Extract key payroll figures from raw employee data (CSV/Excel), map them to match "
+            "the exact columns and rows of a reference template (.xlsx/.ods), calculate totals, "
+            "and generate a clean, ready-to-download Excel report."
+        )
+
+        payroll_mode = st.radio(
+            "Select Input Source:",
+            options=["Use Sample Payroll & Template Files", "Upload Custom Payroll & Template"],
+            horizontal=True,
+        )
+
+        raw_payroll_input = None
+        template_input = None
+
+        if payroll_mode == "Use Sample Payroll & Template Files":
+            sample_raw_p = "data/raw_payroll_data.csv"
+            sample_tmpl_p = "data/payroll_report_template.xlsx"
+            if not Path(sample_raw_p).exists() or not Path(sample_tmpl_p).exists():
+                create_sample_payroll_files(sample_raw_p, sample_tmpl_p)
+            
+            raw_payroll_input = sample_raw_p
+            template_input = sample_tmpl_p
+            st.info("Using built-in sample raw payroll data and standard `.xlsx` reference template.")
+        else:
+            col_u1, col_u2 = st.columns(2)
+            with col_u1:
+                uploaded_raw = st.file_uploader(
+                    "1. Upload Raw Payroll Data (.csv, .xlsx, .xls)",
+                    type=["csv", "xlsx", "xls"],
+                    key="payroll_raw_uploader",
+                )
+                if uploaded_raw:
+                    raw_payroll_input = uploaded_raw
+
+            with col_u2:
+                uploaded_template = st.file_uploader(
+                    "2. Upload Reference Template (.xlsx, .ods)",
+                    type=["xlsx", "ods"],
+                    key="payroll_template_uploader",
+                )
+                if uploaded_template:
+                    template_input = uploaded_template
+
+        if raw_payroll_input and template_input:
+            if st.button("🚀 Process & Generate Financial Report", type="primary"):
+                try:
+                    with st.spinner("Mapping columns and generating formatted Excel report..."):
+                        report_buffer = generate_payroll_report(raw_payroll_input, template_input)
+                    st.success("Financial report generated successfully!")
+                    
+                    st.download_button(
+                        label="📥 Download Mapped Excel Report (.xlsx)",
+                        data=report_buffer,
+                        file_name=f"payroll_financial_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
+                except Exception as ex:
+                    st.error(f"Error during report generation: {ex}")
+        else:
+            st.warning("Please provide both raw payroll data and a reference template to generate the report.")
+
 
 if __name__ == "__main__":
     main()
+

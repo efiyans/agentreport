@@ -9,6 +9,11 @@ from .data_processor import (
     get_department_breakdown,
 )
 from .excel_exporter import export_financial_report
+from .processor import (
+    generate_payroll_report,
+    load_raw_payroll_data,
+    create_sample_payroll_files,
+)
 
 __all__ = [
     "generate_sample_financial_data",
@@ -18,4 +23,8 @@ __all__ = [
     "get_category_breakdown",
     "get_department_breakdown",
     "export_financial_report",
+    "generate_payroll_report",
+    "load_raw_payroll_data",
+    "create_sample_payroll_files",
 ]
+

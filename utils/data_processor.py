@@ -242,3 +242,4 @@ def get_department_breakdown(df: pd.DataFrame) -> pd.DataFrame:
     pivot["Net"] = pivot["Revenue"] - pivot["Expense"]
     pivot.sort_values(by="Expense", ascending=False, inplace=True)
     return pivot
+

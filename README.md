@@ -13,11 +13,14 @@ financial-report-agent/
 ├── .gitignore                  # Git ignore rules for Python & virtual environments
 ├── README.md                   # Project documentation and setup instructions
 ├── data/
-│   └── sample_financial_data.csv # Template financial transactions dataset
+│   ├── sample_financial_data.csv # Template financial transactions dataset
+│   ├── raw_payroll_data.csv      # Sample employee payroll records
+│   └── payroll_report_template.xlsx # Reference report template
 └── utils/
     ├── __init__.py             # Exposes core utility functions
     ├── data_processor.py       # Data loading, validation, and KPI calculations
-    └── excel_exporter.py       # Formatted multi-tab Excel export logic using openpyxl
+    ├── excel_exporter.py       # Formatted multi-tab Excel export logic using openpyxl
+    └── processor.py            # Financial report mapping engine (Raw Data + Template -> Excel)
 ```
 
 ---
@@ -75,6 +78,31 @@ The application will start locally (typically at `http://localhost:8501`).
 
 ---
 
+## 📑 Template-Mapped Financial Report Processor (`utils/processor.py`)
+
+The `utils/processor.py` script automatically bridges raw payroll/employee data with reference Excel or ODS templates:
+
+1. **Two Core Inputs**:
+   - Raw Data File (`.csv`, `.xlsx`, `.xls`): Contains employee records, compensation, and deductions.
+   - Reference Template (`.xlsx`, `.ods`): Defines the target layout, column order, and headers.
+2. **Key Capabilities**:
+   - **Semantic Column Matching**: Maps variations (e.g. `Emp_ID`, `Basic_Pay`, `Tax_Deduction`) to target template columns.
+   - **Derived Calculation**: Automatically computes Gross Pay, Total Deductions, or Net Pay if omitted in raw data.
+   - **Totals Calculation**: Automatically appends an accounting-formatted summary row with `=SUM(...)` formulas.
+   - **Styling**: Applies clean cell borders, currency format (`$#,##0.00`), zebra striping, and auto column widths.
+
+### Running via CLI:
+
+```bash
+# Generate sample files for testing
+python -m utils.processor --create-samples
+
+# Process raw data against a template
+python -m utils.processor data/raw_payroll_data.csv data/payroll_report_template.xlsx -o output_report.xlsx
+```
+
+---
+
 ## 📋 Data Schema for Custom Uploads
 
 When uploading custom `.xlsx` or `.csv` files, the dataset should include the following columns:
@@ -95,3 +123,4 @@ When uploading custom `.xlsx` or `.csv` files, the dataset should include the fo
 - **Streamlit**: Web dashboard interface and reactive state management.
 - **Pandas**: Financial aggregations, grouping, and metrics calculations.
 - **openpyxl**: Excel workbook reading, creation, and cell styling.
+

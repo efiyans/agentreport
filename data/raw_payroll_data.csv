@@ -1,0 +1,7 @@
+Emp_ID,Full_Name,Department,Role,Base_Salary,Overtime_Pay,Bonus,Tax_Deduction,Pension_Contribution,Health_Insurance
+EMP-101,Alice Johnson,Engineering,Lead Architect,9500.0,600.0,1200.0,2486.0,570.0,250.0
+EMP-102,Bob Smith,Engineering,Fullstack Engineer,7800.0,450.0,800.0,1991.0,468.0,250.0
+EMP-103,Carol Davis,Sales,Account Executive,6200.0,0.0,3500.0,2134.0,372.0,250.0
+EMP-104,David Miller,Sales,Sales Manager,8200.0,0.0,4200.0,2728.0,492.0,250.0
+EMP-105,Elena Rostova,Marketing,Growth Lead,7100.0,200.0,1500.0,1936.0,426.0,250.0
+EMP-106,Frank Wilson,Operations,Operations Director,8900.0,0.0,1000.0,2178.0,534.0,250.0

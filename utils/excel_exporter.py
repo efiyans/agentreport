@@ -191,3 +191,4 @@ def export_financial_report(
     wb.save(output_stream)
     output_stream.seek(0)
     return output_stream
+
