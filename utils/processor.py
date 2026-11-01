@@ -559,12 +559,12 @@ def find_matching_raw_column(template_col_name: str, raw_df: pd.DataFrame) -> Op
     if t_canonical:
         # Check canonical mapping tagged on raw_df
         col_mappings: Dict[str, str] = raw_df.attrs.get("canonical_columns", {})
-    if not col_mappings:
-        col_mappings = {}
-        for col in raw_df.columns:
-            can = map_column_to_canonical(col)
-            if can:
-                col_mappings[col] = can
+        if not col_mappings:
+            col_mappings = {}
+            for col in raw_df.columns:
+                can = map_column_to_canonical(col)
+                if can:
+                    col_mappings[col] = can
         for raw_c, can in col_mappings.items():
             if can == t_canonical:
                 return raw_c
@@ -817,6 +817,36 @@ def generate_payroll_report(
         ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
 
     # -------------------------------------------------------------------------
+    # Generate Formatted Preview DataFrame for On-Screen Display
+    # -------------------------------------------------------------------------
+    preview_records = []
+    col_names = [name for _, name in template_cols]
+    for r in range(header_row_idx + 1, current_write_row):
+        row_dict = {}
+        for c_pos, name in template_cols:
+            val = ws.cell(row=r, column=c_pos).value
+            row_dict[name] = val
+        preview_records.append(row_dict)
+
+    preview_df = pd.DataFrame(preview_records)
+
+    # Compute actual totals row for preview display
+    if not preview_df.empty:
+        total_dict = {col_names[0]: "Total"}
+        for name in col_names[1:]:
+            if name in preview_df.columns:
+                num_s = pd.to_numeric(preview_df[name], errors="coerce")
+                if num_s.notna().any() and not num_s.dropna().empty:
+                    total_dict[name] = float(num_s.sum())
+                else:
+                    total_dict[name] = ""
+            else:
+                total_dict[name] = ""
+        preview_df_with_totals = pd.concat([preview_df, pd.DataFrame([total_dict])], ignore_index=True)
+    else:
+        preview_df_with_totals = preview_df
+
+    # -------------------------------------------------------------------------
     # Automated Financial Auditor: Validate sub-totals & major variances (>20%)
     # -------------------------------------------------------------------------
     audit_messages = validate_financial_audit(
@@ -830,6 +860,7 @@ def generate_payroll_report(
     wb.save(output_stream)
     output_stream.seek(0)
     output_stream.audit_messages = audit_messages
+    output_stream.preview_df = preview_df_with_totals
 
     # Optional save to disk
     if output_path:
@@ -839,7 +870,7 @@ def generate_payroll_report(
             f.write(output_stream.getvalue())
 
     if return_audit:
-        return output_stream, audit_messages
+        return output_stream, audit_messages, preview_df_with_totals
     return output_stream
 
 
@@ -986,12 +1017,13 @@ def main():
         return
 
     print(f"Processing '{args.raw_data}' against template '{args.template}'...")
-    _, audit_msgs = generate_payroll_report(
+    res = generate_payroll_report(
         args.raw_data,
         args.template,
         output_path=args.output,
         return_audit=True,
     )
+    audit_msgs = res[1]
     print(f"Report successfully generated and saved to: {args.output}\n")
     print("=== AUTOMATED FINANCIAL AUDIT REPORT ===")
     for msg in audit_msgs:
