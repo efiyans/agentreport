@@ -1,0 +1,20 @@
+Date,Type,Category,Department,Amount,Description
+2025-01-05,Revenue,SaaS Subscriptions,Sales,12450.00,Enterprise monthly billing
+2025-01-08,Expense,Cloud Infrastructure,Engineering,5420.50,AWS cloud hosting services
+2025-01-12,Revenue,Enterprise Licenses,Sales,25000.00,Annual license contract
+2025-01-15,Expense,Salaries & Benefits,Operations,18500.00,Core operations payroll
+2025-01-18,Expense,Paid Advertising,Marketing,3400.00,Google Ads campaign
+2025-01-22,Revenue,Professional Services,Customer Success,6200.00,Onboarding implementation
+2025-01-26,Expense,Software Licenses & Tools,Engineering,2100.00,Developer tooling & CI/CD
+2025-02-04,Revenue,SaaS Subscriptions,Sales,13100.00,Recurring subscriptions
+2025-02-10,Expense,Cloud Infrastructure,Engineering,5600.00,Database clusters and hosting
+2025-02-14,Expense,Salaries & Benefits,Operations,18500.00,Monthly team payroll
+2025-02-19,Revenue,Enterprise Licenses,Sales,28500.00,Q1 enterprise expansion
+2025-02-23,Expense,Paid Advertising,Marketing,4100.00,Paid acquisition channels
+2025-02-27,Expense,Travel & Entertainment,Sales,1850.00,Client summit travel
+2025-03-05,Revenue,SaaS Subscriptions,Sales,14200.00,Monthly subscription growth
+2025-03-09,Revenue,Support Contracts,Customer Success,4500.00,Priority SLA support
+2025-03-14,Expense,Office Facilities & Utilities,Operations,3200.00,Office rent & utilities
+2025-03-18,Expense,Cloud Infrastructure,Engineering,5800.00,Cloud compute scaling
+2025-03-24,Expense,Salaries & Benefits,Operations,19200.00,Operations & support payroll
+2025-03-28,Revenue,Enterprise Licenses,Sales,31000.00,New customer enterprise deal
