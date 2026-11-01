@@ -5,17 +5,20 @@ the exact columns and rows of a reference template (.xlsx or .ods), calculates
 totals, and outputs a clean, ready-to-download Excel workbook.
 """
 
-import io
-import re
-import os
+import csv
 import argparse
+import io
+import os
+import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional, Union
 
 import pandas as pd
 import openpyxl
+from docx import Document
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from pypdf import PdfReader
 
 
 # Standard payroll semantic aliases for intelligent column mapping
@@ -94,35 +97,128 @@ def map_column_to_canonical(col_name: str) -> Optional[str]:
     return None
 
 
+def _dataframe_from_rows(rows: List[List[Any]]) -> pd.DataFrame:
+    """Build a DataFrame from rows whose first row contains the column names."""
+    if len(rows) < 2:
+        return pd.DataFrame()
+
+    width = max(len(row) for row in rows)
+    headers = [
+        str(value).strip() if value is not None and str(value).strip() else f"Column {idx + 1}"
+        for idx, value in enumerate(rows[0] + [None] * (width - len(rows[0])))
+    ]
+    seen_headers = set()
+    for idx, header in enumerate(headers):
+        unique_header = header
+        suffix = 2
+        while unique_header in seen_headers:
+            unique_header = f"{header}_{suffix}"
+            suffix += 1
+        headers[idx] = unique_header
+        seen_headers.add(unique_header)
+
+    body = [row + [None] * (width - len(row)) for row in rows[1:]]
+    return pd.DataFrame(body, columns=headers)
+
+
+def _parse_extracted_text(text: str) -> pd.DataFrame:
+    """Parse delimited or aligned text into columns, preserving unstructured text."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("The uploaded document contains no extractable text.")
+
+    best_rows: List[List[str]] = []
+    for delimiter in (",", "\t", ";", "|", "whitespace"):
+        parsed_lines: List[List[str]] = []
+        for line in lines:
+            if delimiter == "whitespace":
+                cells = re.split(r"\s{2,}", line)
+            else:
+                try:
+                    cells = next(csv.reader([line], delimiter=delimiter))
+                except csv.Error:
+                    cells = [line]
+                if delimiter == "|":
+                    cells = [cell.strip() for cell in cells]
+                    if cells and not cells[0]:
+                        cells = cells[1:]
+                    if cells and not cells[-1]:
+                        cells = cells[:-1]
+            parsed_lines.append([cell.strip() for cell in cells])
+
+        current_rows: List[List[str]] = []
+        for row in parsed_lines:
+            if len(row) > 1 and (not current_rows or len(row) == len(current_rows[0])):
+                current_rows.append(row)
+            else:
+                if len(current_rows) > len(best_rows):
+                    best_rows = current_rows
+                current_rows = [row] if len(row) > 1 else []
+        if len(current_rows) > len(best_rows):
+            best_rows = current_rows
+
+    if len(best_rows) >= 2:
+        return _dataframe_from_rows(best_rows)
+    return pd.DataFrame({"Text": lines})
+
+
+def _load_word_data(file_or_path: Any) -> pd.DataFrame:
+    """Load Word tables, falling back to parsing document paragraphs."""
+    if hasattr(file_or_path, "seek"):
+        file_or_path.seek(0)
+    document = Document(file_or_path)
+    table_frames = []
+    for table in document.tables:
+        rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+        frame = _dataframe_from_rows(rows)
+        if not frame.empty:
+            table_frames.append(frame)
+
+    if table_frames:
+        return pd.concat(table_frames, ignore_index=True, sort=False)
+    return _parse_extracted_text("\n".join(paragraph.text for paragraph in document.paragraphs))
+
+
+def _load_pdf_data(file_or_path: Any) -> pd.DataFrame:
+    """Extract text from a PDF and parse tabular or paragraph content."""
+    if hasattr(file_or_path, "seek"):
+        file_or_path.seek(0)
+    reader = PdfReader(file_or_path)
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    return _parse_extracted_text(text)
+
+
 def load_raw_payroll_data(file_or_path: Any) -> pd.DataFrame:
-    """Load raw payroll information from CSV or Excel into a cleaned pandas DataFrame.
+    """Load CSV, Excel, Word, or PDF payroll data into a cleaned DataFrame.
     
     Automatically handles numeric cleanup and computes standard derived fields
     (Gross Pay, Total Deductions, Net Pay) if they are missing.
     """
-    if hasattr(file_or_path, "name"):
-        fname = file_or_path.name.lower()
-    else:
-        fname = str(file_or_path).lower()
+    fname = getattr(file_or_path, "name", str(file_or_path)).lower()
+    ext = Path(fname).suffix.lower()
 
-    if fname.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(file_or_path, engine="openpyxl")
-    elif fname.endswith((".csv", ".tsv", ".txt")):
+    if ext in (".xlsx", ".xls"):
+        if hasattr(file_or_path, "seek"):
+            file_or_path.seek(0)
+        df = pd.read_excel(file_or_path)
+    elif ext in (".csv", ".tsv", ".txt"):
+        if hasattr(file_or_path, "seek"):
+            file_or_path.seek(0)
         try:
             df = pd.read_csv(file_or_path)
-        except Exception:
-            # Fallback for delimiter autodetection
+        except pd.errors.ParserError:
             if hasattr(file_or_path, "seek"):
                 file_or_path.seek(0)
             df = pd.read_csv(file_or_path, sep=None, engine="python")
+    elif ext == ".docx":
+        df = _load_word_data(file_or_path)
+    elif ext == ".pdf":
+        df = _load_pdf_data(file_or_path)
     else:
-        # Default try excel then csv
-        try:
-            df = pd.read_excel(file_or_path, engine="openpyxl")
-        except Exception:
-            if hasattr(file_or_path, "seek"):
-                file_or_path.seek(0)
-            df = pd.read_csv(file_or_path)
+        raise ValueError(
+            f"Unsupported raw data format '{ext or 'unknown'}'. "
+            "Use CSV, XLSX, XLS, DOCX, or PDF."
+        )
 
     df.columns = [str(c).strip() for c in df.columns]
 
@@ -590,24 +686,37 @@ def generate_payroll_report(
     historical_input: Optional[Any] = None,
     return_audit: bool = False,
     variance_threshold: float = 0.20,
+    output_format: str = "xlsx",
 ) -> Union[io.BytesIO, Tuple[io.BytesIO, List[Dict[str, Any]]]]:
-    """Generate a clean, formatted financial payroll Excel report matching reference template.
+    """Generate a mapped payroll report in XLSX, CSV, or ODS format.
 
     Performs automated financial auditing before saving:
     - Checks that individual payroll sub-totals match the grand total.
     - Checks for major variances (>20%) compared to previous records or historical expectations.
 
     Args:
-        raw_data_input: File path or file-like buffer for raw payroll data (CSV or Excel).
+        raw_data_input: File path or file-like buffer for CSV, Excel, Word, or PDF data.
         template_input: File path or file-like buffer for reference template (.xlsx or .ods).
         output_path: Optional file path to save the generated Excel workbook.
         historical_input: Optional prior period raw data for historical variance auditing.
         return_audit: If True, returns (output_buffer, audit_messages).
         variance_threshold: Volatility variance threshold (default 0.20 = 20%).
+        output_format: Output format: "xlsx", "csv", or "ods".
 
     Returns:
         io.BytesIO stream (with attached .audit_messages) or tuple (io.BytesIO, audit_messages).
     """
+    output_format = output_format.lower().lstrip(".")
+    if output_format not in {"xlsx", "csv", "ods"}:
+        raise ValueError("Unsupported output format. Choose 'xlsx', 'csv', or 'ods'.")
+    if output_path:
+        output_suffix = Path(output_path).suffix.lower()
+        if output_suffix and output_suffix != f".{output_format}":
+            raise ValueError(
+                f"Output path extension '{output_suffix}' does not match "
+                f"the selected '{output_format}' format."
+            )
+
     raw_df = load_raw_payroll_data(raw_data_input)
     t_info = inspect_reference_template(template_input)
 
@@ -691,6 +800,11 @@ def generate_payroll_report(
     for c_pos, col_name in template_cols:
         matched_raw = find_matching_raw_column(col_name, raw_df)
         col_mapping[c_pos] = matched_raw
+    if not any(col_mapping.values()):
+        raise ValueError(
+            "None of the uploaded data columns match the reference template. "
+            "Check that the document contains a header row with compatible column names."
+        )
 
     # Track numeric columns for totaling and formatting
     numeric_template_cols: set = set()
@@ -855,9 +969,19 @@ def generate_payroll_report(
         variance_threshold=variance_threshold,
     )
 
-    # Save to buffer
+    # Export in the selected format.
     output_stream = io.BytesIO()
-    wb.save(output_stream)
+    if output_format == "xlsx":
+        wb.save(output_stream)
+    elif output_format == "csv":
+        output_stream.write(preview_df_with_totals.to_csv(index=False).encode("utf-8"))
+    else:
+        with pd.ExcelWriter(output_stream, engine="odf") as writer:
+            preview_df_with_totals.to_excel(
+                writer,
+                index=False,
+                sheet_name="Financial Payroll Report",
+            )
     output_stream.seek(0)
     output_stream.audit_messages = audit_messages
     output_stream.preview_df = preview_df_with_totals
@@ -1033,4 +1157,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

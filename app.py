@@ -20,6 +20,18 @@ from utils.processor import (
     validate_financial_audit,
 )
 
+OUTPUT_FORMATS = {
+    "xlsx": {
+        "label": "Excel (.xlsx)",
+        "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    },
+    "csv": {"label": "CSV (.csv)", "mime": "text/csv"},
+    "ods": {
+        "label": "LibreOffice Calc (.ods)",
+        "mime": "application/vnd.oasis.opendocument.spreadsheet",
+    },
+}
+
 
 def format_currency(val: Any) -> str:
     """Format numeric values as clean accounting currency strings."""
@@ -190,6 +202,11 @@ def main():
         st.session_state.audit_messages = []
         st.session_state.preview_df = None
         st.session_state.filename = "financial_report.xlsx"
+        st.session_state.report_output_format = "xlsx"
+        st.session_state.report_mime = OUTPUT_FORMATS["xlsx"]["mime"]
+
+    st.session_state.setdefault("report_output_format", "xlsx")
+    st.session_state.setdefault("report_mime", OUTPUT_FORMATS["xlsx"]["mime"])
 
     # -------------------------------------------------------------------------
     # Sidebar: User Session, File Uploaders & Configuration
@@ -224,15 +241,22 @@ def main():
             st.success("✅ Demo sample files loaded.")
         else:
             raw_file = st.file_uploader(
-                "1. Upload Raw Data (CSV)",
-                type=["csv"],
-                help="Raw employee compensation or transaction data in CSV format.",
+                "1. Upload Raw Data",
+                type=["csv", "xlsx", "xls", "docx", "pdf"],
+                help="Upload tabular data as CSV/Excel, or data/text from a Word document or PDF.",
             )
             template_file = st.file_uploader(
                 "2. Upload Reference Template (Excel)",
                 type=["xlsx", "ods"],
                 help="Reference template workbook (.xlsx or .ods) defining target layout and columns.",
             )
+
+        output_format = st.selectbox(
+            "Output format",
+            options=list(OUTPUT_FORMATS),
+            format_func=lambda value: OUTPUT_FORMATS[value]["label"],
+            help="Choose the format for the generated report download.",
+        )
 
         st.divider()
         st.subheader("⚙️ Auditor Settings")
@@ -271,6 +295,7 @@ def main():
                     template_input=template_file,
                     return_audit=True,
                     variance_threshold=variance_threshold,
+                    output_format=output_format,
                 )
                 output_buffer, audit_msgs, preview_df = res[0], res[1], res[2]
 
@@ -279,7 +304,11 @@ def main():
             st.session_state.report_buffer = output_buffer
             st.session_state.audit_messages = audit_msgs
             st.session_state.preview_df = preview_df
-            st.session_state.filename = f"financial_payroll_report_{timestamp_str}.xlsx"
+            st.session_state.report_output_format = output_format
+            st.session_state.report_mime = OUTPUT_FORMATS[output_format]["mime"]
+            st.session_state.filename = (
+                f"financial_payroll_report_{timestamp_str}.{output_format}"
+            )
             st.toast("Report processed & audited successfully!", icon="✅")
 
         except Exception as ex:
@@ -298,11 +327,12 @@ def main():
         with col_act1:
             st.success("✅ **Report Generated Successfully!** All rows mapped to reference template.")
         with col_act2:
+            report_format = st.session_state.report_output_format
             st.download_button(
-                label="📥 Download Final Report (.xlsx)",
+                label=f"📥 Download Final Report (.{report_format})",
                 data=st.session_state.report_buffer,
                 file_name=st.session_state.filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                mime=st.session_state.report_mime,
                 type="primary",
                 use_container_width=True,
             )
@@ -415,11 +445,12 @@ def main():
         st.divider()
         col_d1, col_d2, col_d3 = st.columns([1, 2, 1])
         with col_d2:
+            report_format = st.session_state.report_output_format
             st.download_button(
-                label="📥 Download Final Report (.xlsx)",
+                label=f"📥 Download Final Report (.{report_format})",
                 data=st.session_state.report_buffer,
                 file_name=st.session_state.filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                mime=st.session_state.report_mime,
                 type="primary",
                 use_container_width=True,
                 key="download_bottom",
@@ -433,16 +464,17 @@ def main():
 
         col_g1, col_g2 = st.columns(2)
         with col_g1:
-            st.markdown("### 1️⃣ Raw Data (CSV)")
+            st.markdown("### 1️⃣ Raw Data")
             st.markdown(
                 """
                 Upload your raw employee compensation or financial records:
+                - Supports CSV, Excel (`.xlsx`, `.xls`), Word (`.docx`), and PDF.
                 - Supports columns like `Emp_ID`, `Name`, `Department`, `Base_Salary`, `Overtime`, `Bonus`, `Tax`, etc.
                 - Automatically calculates derived fields (*Gross Pay, Deductions, Net Pay*) if omitted.
                 """
             )
         with col_g2:
-            st.markdown("### 2️⃣ Reference Template (Excel)")
+            st.markdown("### 2️⃣ Reference Template")
             st.markdown(
                 """
                 Upload a past template report (`.xlsx` or `.ods`):

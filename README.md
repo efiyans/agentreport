@@ -67,7 +67,8 @@ The application will start locally (typically at `http://localhost:8501`).
 - **Department P&L Breakdown**: Aggregate revenue, expenses, and net margins segmented by department or business unit.
 - **Flexible Data Input**:
   - Built-in synthetic sample data generator with realistic 14-month SaaS/Enterprise transactions.
-  - Custom file upload supporting both Excel (`.xlsx`, `.xls`) and CSV files.
+  - Payroll report inputs support CSV, Excel (`.xlsx`, `.xls`), Word (`.docx`), and PDF files.
+  - Generated payroll reports can be downloaded as Excel (`.xlsx`), CSV, or LibreOffice Calc (`.ods`).
 - **Dynamic Global Filters**: Filter by date range, department, and transaction type (Revenue / Expense).
 - **Executive Excel Export**: Formatted multi-tab `.xlsx` reports generated via `openpyxl`:
   - *Executive Summary*: Styled KPI indicators with currency and percentage formatting.
@@ -83,13 +84,13 @@ The application will start locally (typically at `http://localhost:8501`).
 The `utils/processor.py` script automatically bridges raw payroll/employee data with reference Excel or ODS templates:
 
 1. **Two Core Inputs**:
-   - Raw Data File (`.csv`, `.xlsx`, `.xls`): Contains employee records, compensation, and deductions.
+   - Raw Data File (`.csv`, `.xlsx`, `.xls`, `.docx`, `.pdf`): Contains employee records, compensation, and deductions. Word tables and extractable PDF text are parsed automatically.
    - Reference Template (`.xlsx`, `.ods`): Defines the target layout, column order, and headers.
 2. **Key Capabilities**:
    - **Semantic Column Matching**: Maps variations (e.g. `Emp_ID`, `Basic_Pay`, `Tax_Deduction`) to target template columns.
    - **Derived Calculation**: Automatically computes Gross Pay, Total Deductions, or Net Pay if omitted in raw data.
    - **Totals Calculation**: Automatically appends an accounting-formatted summary row with `=SUM(...)` formulas.
-   - **Styling**: Applies clean cell borders, currency format (`$#,##0.00`), zebra striping, and auto column widths.
+   - **Styling**: Excel reports include clean cell borders, currency format (`$#,##0.00`), zebra striping, and auto column widths. CSV and ODS reports export the mapped table and calculated totals.
 
 ### Running via CLI:
 
@@ -105,7 +106,7 @@ python -m utils.processor data/raw_payroll_data.csv data/payroll_report_template
 
 ## 📋 Data Schema for Custom Uploads
 
-When uploading custom `.xlsx` or `.csv` files, the dataset should include the following columns:
+When uploading custom CSV/Excel files, or tabular content in Word/PDF documents, the dataset should include the following columns:
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
@@ -123,4 +124,7 @@ When uploading custom `.xlsx` or `.csv` files, the dataset should include the fo
 - **Streamlit**: Web dashboard interface and reactive state management.
 - **Pandas**: Financial aggregations, grouping, and metrics calculations.
 - **openpyxl**: Excel workbook reading, creation, and cell styling.
-
+- **xlrd**: Reading legacy `.xls` workbooks.
+- **python-docx**: Extracting Word document tables and text.
+- **pypdf**: Extracting selectable text from PDF documents (image-only PDFs require OCR before upload).
+- **odfpy**: Reading and writing LibreOffice Calc (`.ods`) workbooks.
