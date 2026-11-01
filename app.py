@@ -390,9 +390,13 @@ def main():
         if raw_payroll_input and template_input:
             if st.button("🚀 Process & Generate Financial Report", type="primary"):
                 try:
-                    with st.spinner("Mapping columns and generating formatted Excel report..."):
-                        report_buffer = generate_payroll_report(raw_payroll_input, template_input)
-                    st.success("Financial report generated successfully!")
+                    with st.spinner("Mapping columns, calculating totals, and auditing financial integrity..."):
+                        report_buffer, audit_messages = generate_payroll_report(
+                            raw_payroll_input,
+                            template_input,
+                            return_audit=True,
+                        )
+                    st.success("Financial report generated and audited successfully!")
                     
                     st.download_button(
                         label="📥 Download Mapped Excel Report (.xlsx)",
@@ -401,6 +405,34 @@ def main():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                     )
+
+                    # Automated Financial Auditor Section
+                    st.markdown("---")
+                    st.markdown("### 🛡️ Automated Financial Auditor Results")
+                    st.caption("Pre-save reconciliation of sub-totals against Grand Total & major variance detection (>20%).")
+
+                    warnings_list = [m for m in audit_messages if m["type"] == "warning"]
+                    success_list = [m for m in audit_messages if m["type"] == "success"]
+                    info_list = [m for m in audit_messages if m["type"] == "info"]
+
+                    col_stat1, col_stat2, col_stat3 = st.columns(3)
+                    with col_stat1:
+                        st.metric("Audited Reconciliations", len(success_list), delta="Matched" if success_list else None)
+                    with col_stat2:
+                        st.metric("Variance Warnings (>20%)", len(warnings_list), delta="-Warnings" if warnings_list else "Zero Warnings", delta_color="inverse")
+                    with col_stat3:
+                        st.metric("Cohort / Outlier Notices", len(info_list))
+
+                    st.markdown("#### Audit Ledger Details")
+                    for msg in audit_messages:
+                        category_tag = f"**[{msg['category']}]**"
+                        if msg["type"] == "warning":
+                            st.warning(f"{category_tag} {msg['message']}")
+                        elif msg["type"] == "success":
+                            st.success(f"{category_tag} {msg['message']}")
+                        else:
+                            st.info(f"{category_tag} {msg['message']}")
+
                 except Exception as ex:
                     st.error(f"Error during report generation: {ex}")
         else:

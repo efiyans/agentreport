@@ -33,7 +33,7 @@ PAYROLL_COLUMN_ALIASES: Dict[str, List[str]] = {
     "pension": ["pension", "social_security", "social_security_tax", "401k", "pf", "provident_fund", "fica", "superannuation"],
     "insurance": ["insurance", "health_insurance", "medical_insurance", "dental", "medical", "health_benefit"],
     "other_deductions": ["other_deductions", "misc_deductions", "loan_repayment", "advances", "voluntary_deductions"],
-    "total_deductions": ["total_deductions", "deductions", "total_deduction", "all_deductions"],
+    "total_deductions": ["total_deductions", "deductions", "total_deduction", "all_deductions", "ded", "total_ded", "tot_ded"],
     "net_pay": ["net_pay", "net_salary", "take_home", "net_amount", "take_home_pay", "net"],
     "employer_contributions": ["employer_contributions", "employer_cost", "employer_pension", "employer_taxes", "company_contributions"],
     "total_cost": ["total_cost", "ctc", "company_cost", "total_employment_cost", "total_payroll_cost"],
@@ -273,6 +273,278 @@ def inspect_reference_template(template_file_or_path: Any) -> Dict[str, Any]:
     }
 
 
+def validate_financial_audit(
+    raw_df: pd.DataFrame,
+    historical_df: Optional[pd.DataFrame] = None,
+    variance_threshold: float = 0.20,
+) -> List[Dict[str, Any]]:
+    """Automated Financial Auditor.
+
+    Performs audit checks before saving the final report:
+    1. Reconciles individual payroll sub-totals against the grand total.
+    2. Identifies major variances (> 20%) compared to previous rows,
+       department cohort averages, and historical expectations.
+
+    Returns:
+        List of structured audit message dictionaries containing:
+        'type' ('success', 'warning', 'info'), 'category', and 'message'.
+    """
+    messages: List[Dict[str, Any]] = []
+
+    if raw_df.empty:
+        messages.append({
+            "type": "warning",
+            "category": "Data Completeness",
+            "message": "Audit Warning: Payroll dataset is empty. No financial records to audit.",
+        })
+        return messages
+
+    col_mappings: Dict[str, str] = raw_df.attrs.get("canonical_columns", {})
+    if not col_mappings:
+        col_mappings = {}
+        for col in raw_df.columns:
+            can = map_column_to_canonical(col)
+            if can:
+                col_mappings[col] = can
+
+    def get_canonical_series(field_key: str) -> pd.Series:
+        for raw_c, can in col_mappings.items():
+            if can == field_key and raw_c in raw_df.columns:
+                return raw_df[raw_c].fillna(0.0).astype(float)
+        return pd.Series(0.0, index=raw_df.index, dtype=float)
+
+    # Core payroll component sums
+    sum_base = float(get_canonical_series("base_salary").sum())
+    sum_ot = float(get_canonical_series("overtime").sum())
+    sum_bonus = float(get_canonical_series("bonus").sum())
+    sum_allowances = float(get_canonical_series("allowances").sum())
+    sum_gross = float(get_canonical_series("gross_pay").sum())
+
+    sum_tax = float(get_canonical_series("tax").sum())
+    sum_pension = float(get_canonical_series("pension").sum())
+    sum_ins = float(get_canonical_series("insurance").sum())
+    sum_other_ded = float(get_canonical_series("other_deductions").sum())
+    sum_deductions = float(get_canonical_series("total_deductions").sum())
+
+    sum_net = float(get_canonical_series("net_pay").sum())
+
+    # -------------------------------------------------------------------------
+    # Audit Check 1: Sub-totals vs. Grand Total Reconciliation
+    # -------------------------------------------------------------------------
+    # 1.1 Gross Pay reconciliation: Base + OT + Bonus + Allowances == Gross
+    expected_gross = sum_base + sum_ot + sum_bonus + sum_allowances
+    gross_discrepancy = abs(sum_gross - expected_gross)
+
+    if sum_gross > 0:
+        if gross_discrepancy <= 0.05:
+            messages.append({
+                "type": "success",
+                "category": "Sub-total Reconciliation",
+                "message": (
+                    f"Gross Pay Balance Verified: Grand total Gross Pay (${sum_gross:,.2f}) "
+                    f"perfect reconciles with sum of Base (${sum_base:,.2f}), Overtime (${sum_ot:,.2f}), "
+                    f"Bonuses (${sum_bonus:,.2f}), and Allowances (${sum_allowances:,.2f})."
+                ),
+            })
+        else:
+            messages.append({
+                "type": "warning",
+                "category": "Sub-total Reconciliation",
+                "message": (
+                    f"Sub-total Discrepancy Detected: Grand Total Gross Pay (${sum_gross:,.2f}) "
+                    f"does not match sum of individual earnings components (${expected_gross:,.2f}). "
+                    f"Unreconciled Variance: ${gross_discrepancy:,.2f}."
+                ),
+            })
+
+    # 1.2 Deductions reconciliation: Tax + Pension + Insurance + Other == Total Deductions
+    expected_deductions = sum_tax + sum_pension + sum_ins + sum_other_ded
+    ded_discrepancy = abs(sum_deductions - expected_deductions)
+
+    if sum_deductions > 0:
+        if ded_discrepancy <= 0.05:
+            messages.append({
+                "type": "success",
+                "category": "Sub-total Reconciliation",
+                "message": (
+                    f"Deductions Balance Verified: Grand total Deductions (${sum_deductions:,.2f}) "
+                    f"matches sum of Tax (${sum_tax:,.2f}), Pension (${sum_pension:,.2f}), "
+                    f"and Insurance (${sum_ins:,.2f})."
+                ),
+            })
+        else:
+            messages.append({
+                "type": "warning",
+                "category": "Sub-total Reconciliation",
+                "message": (
+                    f"Deductions Discrepancy Detected: Grand Total Deductions (${sum_deductions:,.2f}) "
+                    f"differs from sum of itemized deductions (${expected_deductions:,.2f}) "
+                    f"by ${ded_discrepancy:,.2f}."
+                ),
+            })
+
+    # 1.3 Net Pay reconciliation: Gross Pay - Total Deductions == Net Pay
+    effective_deductions = sum_deductions if sum_deductions > 0 else expected_deductions
+    expected_net = sum_gross - effective_deductions
+    net_discrepancy = abs(sum_net - expected_net)
+
+    if sum_net > 0:
+        if net_discrepancy <= 0.05:
+            messages.append({
+                "type": "success",
+                "category": "Sub-total Reconciliation",
+                "message": (
+                    f"Net Pay Reconciliation Verified: Grand total Net Pay (${sum_net:,.2f}) "
+                    f"equals Total Gross Pay (${sum_gross:,.2f}) minus Total Deductions (${effective_deductions:,.2f})."
+                ),
+            })
+        else:
+            messages.append({
+                "type": "warning",
+                "category": "Sub-total Reconciliation",
+                "message": (
+                    f"Net Pay Discrepancy Detected: Grand total Net Pay (${sum_net:,.2f}) "
+                    f"differs from (Gross - Deductions) (${expected_net:,.2f}) by ${net_discrepancy:,.2f}."
+                ),
+            })
+
+    # -------------------------------------------------------------------------
+    # Audit Check 2: Major Variance (> 20%) Checks
+    # -------------------------------------------------------------------------
+    # Identify employee name and department columns
+    name_col = None
+    dept_col = None
+    for raw_c, can in col_mappings.items():
+        if can == "employee_name":
+            name_col = raw_c
+        elif can == "department":
+            dept_col = raw_c
+
+    gross_series = get_canonical_series("gross_pay")
+    base_series = get_canonical_series("base_salary")
+    ot_series = get_canonical_series("overtime")
+    bonus_series = get_canonical_series("bonus")
+
+    variance_flags_count = 0
+
+    # 2.1 Sequential (Row-to-Row) Variance (> 20%)
+    if len(raw_df) > 1:
+        for idx in range(1, len(raw_df)):
+            curr_val = float(gross_series.iloc[idx])
+            prev_val = float(gross_series.iloc[idx - 1])
+            
+            curr_name = raw_df[name_col].iloc[idx] if name_col else f"Row {idx+1}"
+            prev_name = raw_df[name_col].iloc[idx - 1] if name_col else f"Row {idx}"
+            dept_name = f" ({raw_df[dept_col].iloc[idx]})" if dept_col else ""
+
+            if prev_val > 0:
+                pct_change = (curr_val - prev_val) / prev_val
+                if abs(pct_change) > variance_threshold:
+                    variance_flags_count += 1
+                    direction = "increase" if pct_change > 0 else "decrease"
+                    messages.append({
+                        "type": "warning",
+                        "category": "Sequential Variance (>20%)",
+                        "message": (
+                            f"Row-to-Row Variance Alert: {curr_name}{dept_name} Gross Pay (${curr_val:,.2f}) "
+                            f"shows a {abs(pct_change)*100:.1f}% {direction} compared to previous record "
+                            f"'{prev_name}' (${prev_val:,.2f})."
+                        ),
+                    })
+
+    # 2.2 Historical / Benchmark Expectations Variance (> 20%)
+    if historical_df is not None and not historical_df.empty:
+        # Compare department totals against historical baseline
+        hist_col_mappings: Dict[str, str] = historical_df.attrs.get("canonical_columns", {})
+        hist_dept_col = None
+        for raw_c, can in hist_col_mappings.items():
+            if can == "department":
+                hist_dept_col = raw_c
+
+        if dept_col and hist_dept_col and dept_col in raw_df.columns and hist_dept_col in historical_df.columns:
+            curr_dept_totals = raw_df.groupby(dept_col)[raw_df.columns[0]].count() if "gross_pay" not in col_mappings else raw_df.groupby(dept_col)[list(col_mappings.keys())[list(col_mappings.values()).index("gross_pay")]].sum()
+            hist_dept_totals = historical_df.groupby(hist_dept_col)[historical_df.columns[0]].count() if "gross_pay" not in hist_col_mappings else historical_df.groupby(hist_dept_col)[list(hist_col_mappings.keys())[list(hist_col_mappings.values()).index("gross_pay")]].sum()
+
+            for d_name, curr_total in curr_dept_totals.items():
+                if d_name in hist_dept_totals:
+                    hist_total = float(hist_dept_totals[d_name])
+                    if hist_total > 0:
+                        dept_variance = (float(curr_total) - hist_total) / hist_total
+                        if abs(dept_variance) > variance_threshold:
+                            variance_flags_count += 1
+                            v_dir = "higher" if dept_variance > 0 else "lower"
+                            messages.append({
+                                "type": "warning",
+                                "category": "Historical Variance (>20%)",
+                                "message": (
+                                    f"Historical Variance Alert: Department '{d_name}' payroll (${curr_total:,.2f}) "
+                                    f"is {abs(dept_variance)*100:.1f}% {v_dir} than historical expectation (${hist_total:,.2f})."
+                                ),
+                            })
+    else:
+        # Use cohort benchmark (department median/average) as expectation
+        if dept_col and dept_col in raw_df.columns and not gross_series.empty:
+            df_cohort = raw_df.copy()
+            df_cohort["_gross"] = gross_series
+            dept_means = df_cohort.groupby(dept_col)["_gross"].mean()
+
+            for idx, r_data in df_cohort.iterrows():
+                d_name = r_data[dept_col]
+                d_mean = float(dept_means.get(d_name, 0.0))
+                g_val = float(r_data["_gross"])
+                if d_mean > 0:
+                    cohort_diff = (g_val - d_mean) / d_mean
+                    if abs(cohort_diff) > variance_threshold:
+                        emp_lbl = r_data[name_col] if name_col else f"Record {idx+1}"
+                        # Log as informative notice if significantly above cohort average
+                        messages.append({
+                            "type": "info",
+                            "category": "Cohort Variance (>20%)",
+                            "message": (
+                                f"Cohort Variance Notice: {emp_lbl} ({d_name}) Gross Pay (${g_val:,.2f}) "
+                                f"deviates by {cohort_diff*100:+.1f}% from the department average (${d_mean:,.2f})."
+                            ),
+                        })
+
+    # 2.3 Component Ratio Outlier Checks (> 20% of Base Salary)
+    for idx in range(len(raw_df)):
+        b_val = float(base_series.iloc[idx])
+        ot_val = float(ot_series.iloc[idx])
+        bonus_val = float(bonus_series.iloc[idx])
+        emp_lbl = raw_df[name_col].iloc[idx] if name_col else f"Row {idx+1}"
+        d_lbl = f" ({raw_df[dept_col].iloc[idx]})" if dept_col else ""
+
+        if b_val > 0:
+            if (ot_val / b_val) > variance_threshold:
+                variance_flags_count += 1
+                messages.append({
+                    "type": "warning",
+                    "category": "Overtime Surge (>20%)",
+                    "message": (
+                        f"Overtime Surge Alert: {emp_lbl}{d_lbl} overtime pay (${ot_val:,.2f}) "
+                        f"represents {(ot_val/b_val)*100:.1f}% of base salary (exceeds 20% threshold)."
+                    ),
+                })
+            if (bonus_val / b_val) > variance_threshold:
+                messages.append({
+                    "type": "info",
+                    "category": "Incentive Spike (>20%)",
+                    "message": (
+                        f"Incentive Spike Notice: {emp_lbl}{d_lbl} bonus (${bonus_val:,.2f}) "
+                        f"represents {(bonus_val/b_val)*100:.1f}% of base salary."
+                    ),
+                })
+
+    if variance_flags_count == 0:
+        messages.append({
+            "type": "success",
+            "category": "Variance Compliance",
+            "message": "Variance Audit Passed: No abnormal volatility or unexpected >20% spikes detected across records.",
+        })
+
+    return messages
+
+
 def find_matching_raw_column(template_col_name: str, raw_df: pd.DataFrame) -> Optional[str]:
     """Find the best matching raw dataframe column for a given template column."""
     # 1. Exact match (case insensitive)
@@ -287,6 +559,12 @@ def find_matching_raw_column(template_col_name: str, raw_df: pd.DataFrame) -> Op
     if t_canonical:
         # Check canonical mapping tagged on raw_df
         col_mappings: Dict[str, str] = raw_df.attrs.get("canonical_columns", {})
+    if not col_mappings:
+        col_mappings = {}
+        for col in raw_df.columns:
+            can = map_column_to_canonical(col)
+            if can:
+                col_mappings[col] = can
         for raw_c, can in col_mappings.items():
             if can == t_canonical:
                 return raw_c
@@ -309,19 +587,36 @@ def generate_payroll_report(
     raw_data_input: Any,
     template_input: Any,
     output_path: Optional[Union[str, Path]] = None,
-) -> io.BytesIO:
+    historical_input: Optional[Any] = None,
+    return_audit: bool = False,
+    variance_threshold: float = 0.20,
+) -> Union[io.BytesIO, Tuple[io.BytesIO, List[Dict[str, Any]]]]:
     """Generate a clean, formatted financial payroll Excel report matching reference template.
-    
+
+    Performs automated financial auditing before saving:
+    - Checks that individual payroll sub-totals match the grand total.
+    - Checks for major variances (>20%) compared to previous records or historical expectations.
+
     Args:
         raw_data_input: File path or file-like buffer for raw payroll data (CSV or Excel).
         template_input: File path or file-like buffer for reference template (.xlsx or .ods).
         output_path: Optional file path to save the generated Excel workbook.
-        
+        historical_input: Optional prior period raw data for historical variance auditing.
+        return_audit: If True, returns (output_buffer, audit_messages).
+        variance_threshold: Volatility variance threshold (default 0.20 = 20%).
+
     Returns:
-        io.BytesIO stream containing the generated ready-to-download Excel workbook.
+        io.BytesIO stream (with attached .audit_messages) or tuple (io.BytesIO, audit_messages).
     """
     raw_df = load_raw_payroll_data(raw_data_input)
     t_info = inspect_reference_template(template_input)
+
+    historical_df = None
+    if historical_input is not None:
+        try:
+            historical_df = load_raw_payroll_data(historical_input)
+        except Exception:
+            historical_df = None
 
     # Styling constants
     header_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
@@ -521,10 +816,20 @@ def generate_payroll_report(
                 max_len = max(max_len, len(val_str))
         ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
 
+    # -------------------------------------------------------------------------
+    # Automated Financial Auditor: Validate sub-totals & major variances (>20%)
+    # -------------------------------------------------------------------------
+    audit_messages = validate_financial_audit(
+        raw_df=raw_df,
+        historical_df=historical_df,
+        variance_threshold=variance_threshold,
+    )
+
     # Save to buffer
     output_stream = io.BytesIO()
     wb.save(output_stream)
     output_stream.seek(0)
+    output_stream.audit_messages = audit_messages
 
     # Optional save to disk
     if output_path:
@@ -533,6 +838,8 @@ def generate_payroll_report(
         with open(out_p, "wb") as f:
             f.write(output_stream.getvalue())
 
+    if return_audit:
+        return output_stream, audit_messages
     return output_stream
 
 
@@ -679,8 +986,17 @@ def main():
         return
 
     print(f"Processing '{args.raw_data}' against template '{args.template}'...")
-    generate_payroll_report(args.raw_data, args.template, output_path=args.output)
-    print(f"Report successfully generated and saved to: {args.output}")
+    _, audit_msgs = generate_payroll_report(
+        args.raw_data,
+        args.template,
+        output_path=args.output,
+        return_audit=True,
+    )
+    print(f"Report successfully generated and saved to: {args.output}\n")
+    print("=== AUTOMATED FINANCIAL AUDIT REPORT ===")
+    for msg in audit_msgs:
+        tag = f"[{msg['type'].upper()}]"
+        print(f"{tag:<10} ({msg['category']}): {msg['message']}")
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from .processor import (
     generate_payroll_report,
     load_raw_payroll_data,
     create_sample_payroll_files,
+    validate_financial_audit,
 )
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "generate_payroll_report",
     "load_raw_payroll_data",
     "create_sample_payroll_files",
+    "validate_financial_audit",
 ]
 
