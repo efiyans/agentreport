@@ -8,6 +8,7 @@ review automated financial auditor warnings, and download the finished .xlsx fil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+import hmac
 
 import pandas as pd
 import streamlit as st
@@ -59,6 +60,69 @@ def format_table_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return display_df
 
 
+def check_password() -> bool:
+    """Validate credentials against st.secrets['credentials'].
+
+    Renders a login screen with 'Username' and 'Password' input fields and a 'Log in' button.
+    Returns True if the user is authenticated, False otherwise.
+    """
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # Check credentials block in st.secrets
+    if "credentials" not in st.secrets:
+        st.error(
+            "⚠️ Authentication Error: `[credentials]` block is missing from `secrets.toml`. "
+            "Please configure `.streamlit/secrets.toml` or Streamlit Cloud Secrets."
+        )
+        return False
+
+    # Center login form
+    _, col_login, _ = st.columns([1, 2, 1])
+    with col_login:
+        st.markdown(
+            """
+            <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 24px; margin-top: 30px; margin-bottom: 20px;">
+                <h3 style="margin-top: 0; color: #1E3A8A; display: flex; align-items: center; gap: 8px;">
+                    🔒 Financial Dashboard Login
+                </h3>
+                <p style="color: #6B7280; font-size: 0.95rem; margin-bottom: 0;">
+                    Please enter your authorized credentials to access the financial reporting portal.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        with st.form("login_form", clear_on_submit=False):
+            username_input = st.text_input("Username", key="login_username", placeholder="Enter username")
+            password_input = st.text_input("Password", type="password", key="login_password", placeholder="Enter password")
+            submit_button = st.form_submit_button("Log in", type="primary", use_container_width=True)
+
+            if submit_button:
+                creds = st.secrets["credentials"]
+                is_valid = False
+
+                # Handle [credentials] table with username and password
+                if "username" in creds and "password" in creds:
+                    expected_user = str(creds["username"])
+                    expected_pass = str(creds["password"])
+                    if hmac.compare_digest(username_input, expected_user) and hmac.compare_digest(password_input, expected_pass):
+                        is_valid = True
+                # Handle multi-user dict mapping username -> password
+                elif username_input in creds and hmac.compare_digest(password_input, str(creds[username_input])):
+                    is_valid = True
+
+                if is_valid:
+                    st.session_state["password_correct"] = True
+                    st.session_state["logged_in_user"] = username_input
+                    st.rerun()
+                else:
+                    st.error("❌ Incorrect username or password. Please try again.")
+
+    return False
+
+
 def main():
     st.set_page_config(
         page_title="Financial Report Generator & Auditor",
@@ -66,6 +130,10 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded",
     )
+
+    # Enforce authentication - stop execution of main app content unless authenticated
+    if not check_password():
+        st.stop()
 
     # Styling for professional modern look
     st.markdown(
@@ -124,9 +192,17 @@ def main():
         st.session_state.filename = "financial_report.xlsx"
 
     # -------------------------------------------------------------------------
-    # Sidebar: File Uploaders & Configuration
+    # Sidebar: User Session, File Uploaders & Configuration
     # -------------------------------------------------------------------------
     with st.sidebar:
+        user_name = st.session_state.get("logged_in_user", "Authorized User")
+        st.markdown(f"👤 Signed in as **{user_name}**")
+        if st.button("🚪 Log out", key="logout_btn", use_container_width=True):
+            st.session_state["password_correct"] = False
+            st.session_state.pop("logged_in_user", None)
+            st.rerun()
+
+        st.divider()
         st.header("📁 Document Uploads")
 
         use_demo = st.checkbox(
